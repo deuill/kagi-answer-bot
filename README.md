@@ -9,7 +9,7 @@ Installing `kagi-answer-bot` locally requires that you have Go installed, at a m
 simply run the following command:
 
 ```sh
-$ go install go.deuill.org/webhook-gateway/cmd/webhook-gateway@latest
+$ go install go.deuill.org/kagi-answer-bot/cmd/kagi-answer-bot@latest
 ```
 
 The `kagi-answer-bot` binary should be placed in your `$GOBIN` path. Pre-built binaries are not
