@@ -7,6 +7,9 @@ RUN go build -o /kagi-answer-bot
 
 FROM docker.io/debian:stable-slim
 
+RUN apt-get update -y && apt-get install -y --no-install-recommends \
+    ca-certificates
+
 COPY --from=builder /kagi-answer-bot /
 
 USER nobody
