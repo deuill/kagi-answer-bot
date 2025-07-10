@@ -12,6 +12,7 @@ import (
 
 	// Third-party packages
 	"github.com/go-joe/joe"
+	"go.uber.org/zap"
 )
 
 // Error messages.
@@ -26,6 +27,7 @@ var (
 const (
 	msgAnswerProgress = "Checking answers, please wait..."
 	msgAnswerFailed   = "Failed to get answer"
+	msgEmptyAnswer    = "Empty answer returned by Kagi, try again in a bit..."
 )
 
 const (
@@ -47,6 +49,7 @@ type Client struct {
 	// Other internal fields.
 	bot       Bot
 	transport http.RoundTripper
+	logger    *zap.Logger
 }
 
 // A Bot represents an automated user that provides the ability of pushing (or "saying") plain-text
@@ -84,12 +87,21 @@ func WithUserAgent(agent string) ClientOption {
 	}
 }
 
+// WithLogger sets the [zap.Logger] to use in emitting logs, overriding the no-op default logger.
+func WithLogger(logger *zap.Logger) ClientOption {
+	return func(c *Client) error {
+		c.logger = logger
+		return nil
+	}
+}
+
 // NewClient returns a Kagi API client for the given options, or an error if initializing a client
 // fails for any reason.
 func NewClient(options ...ClientOption) (*Client, error) {
 	var c = &Client{
 		userAgent: defaultUserAgent,
 		transport: http.DefaultTransport,
+		logger:    zap.NewNop(),
 	}
 
 	for _, fn := range options {
@@ -114,10 +126,13 @@ func NewClient(options ...ClientOption) (*Client, error) {
 // Markdown format.
 func (c *Client) HandleEvent(ctx context.Context, e joe.ReceiveMessageEvent) error {
 	c.bot.Say(e.Channel, msgAnswerProgress)
+	c.logger.Debug("Handling incoming event", zap.Any("event", e))
 
 	result, err := c.Answer(ctx, e.Text)
 	if err != nil {
 		result = fmt.Sprintf("%s: %s", msgAnswerFailed, err)
+	} else if result == "" {
+		result = msgEmptyAnswer
 	}
 
 	c.bot.Say(e.Channel, result)
