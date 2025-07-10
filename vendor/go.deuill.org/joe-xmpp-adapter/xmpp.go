@@ -371,7 +371,9 @@ func (c *Client) Connect(ctx context.Context) error {
 	}
 
 	go func() {
-		_ = c.session.Serve(c)
+		if err = c.session.Serve(c); err != nil {
+			c.logger.Error("session stopped serving: %s", zap.Error(err))
+		}
 	}()
 
 	return nil
@@ -437,7 +439,7 @@ func NewClient(conf Config) (*Client, error) {
 
 	if conf.AllowedJIDs != "" {
 		c.allowedJIDs = make(map[string]struct{})
-		for _, id := range strings.Fields(conf.AllowedJIDs) {
+		for id := range strings.FieldsSeq(conf.AllowedJIDs) {
 			if _, err := jid.Parse(id); err != nil {
 				return nil, fmt.Errorf("parsing allowed JID failed: %w", err)
 			}

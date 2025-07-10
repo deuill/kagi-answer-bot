@@ -2,7 +2,7 @@
 ## explicit; go 1.14
 github.com/go-joe/joe
 github.com/go-joe/joe/reactions
-# go.deuill.org/joe-xmpp-adapter v0.2.1
+# go.deuill.org/joe-xmpp-adapter v0.2.2
 ## explicit; go 1.24.3
 go.deuill.org/joe-xmpp-adapter
 # go.uber.org/multierr v1.11.0
@@ -22,16 +22,16 @@ go.uber.org/zap/zapcore
 # golang.org/x/crypto v0.39.0
 ## explicit; go 1.23.0
 golang.org/x/crypto/pbkdf2
-# golang.org/x/mod v0.25.0
+# golang.org/x/mod v0.26.0
 ## explicit; go 1.23.0
 golang.org/x/mod/semver
 # golang.org/x/net v0.41.0
 ## explicit; go 1.23.0
 golang.org/x/net/idna
-# golang.org/x/sync v0.15.0
+# golang.org/x/sync v0.16.0
 ## explicit; go 1.23.0
 golang.org/x/sync/errgroup
-# golang.org/x/text v0.26.0
+# golang.org/x/text v0.27.0
 ## explicit; go 1.23.0
 golang.org/x/text/cases
 golang.org/x/text/internal
