@@ -25,6 +25,7 @@ func main() {
 	if l := os.Getenv("KAGI_ANSWER_BOT_LOG_LEVEL"); l != "" {
 		if logLevel, err = zapcore.ParseLevel(l); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to set log level '%s': %s", l, err)
+			os.Exit(1)
 		}
 	}
 
