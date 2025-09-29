@@ -6,10 +6,12 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"strings"
+	"time"
 
 	// Third-party packages
 	"github.com/go-joe/joe"
@@ -370,13 +372,17 @@ func (c *Client) Connect(ctx context.Context) error {
 		return fmt.Errorf("setting initial presence failed: %w", err)
 	}
 
-	go func() {
-		if err = c.session.Serve(c); err != nil {
-			c.logger.Error("session stopped serving: %s", zap.Error(err))
-		}
-	}()
-
 	return nil
+}
+
+// Serve initiates handling of XML tokens over a XMPP server connection, as established by [Connect].
+// Calls to this function will return an error if the session has not been established.
+func (c *Client) Serve(ctx context.Context) error {
+	if c.session == nil {
+		return fmt.Errorf("cannot serve for inactive session connection")
+	}
+
+	return c.session.Serve(c)
 }
 
 // Close shuts down the active XMPP session and server connection, returning an error if the process
@@ -397,6 +403,7 @@ func (c *Client) Close() error {
 		}
 	}
 
+	c.session = nil
 	return nil
 }
 
@@ -450,6 +457,15 @@ func NewClient(conf Config) (*Client, error) {
 	return c, nil
 }
 
+const (
+	// The default amount of time we'll attempt to wait before re-establishing an XMPP session.
+	sessionRetryWait = 5 * time.Second
+
+	// The maximum amount of time we'll wait before re-establishing an XMPP session when backing-off
+	// incrementally.
+	sessionRetryWaitMax = 1 * time.Minute
+)
+
 // Adapter initializes an XMPP client connection according to configuration given, and returns a Joe
 // module, usable in calls to joe.New(), or an error if any occurs.
 func Adapter(ctx context.Context, conf Config) joe.Module {
@@ -466,6 +482,26 @@ func Adapter(ctx context.Context, conf Config) joe.Module {
 		if err = c.Connect(ctx); err != nil {
 			return err
 		}
+
+		var sessionRetryCount int
+		go func() {
+			for {
+				err := c.session.Serve(c)
+				switch {
+				case errors.Is(err, net.ErrClosed):
+					return
+				case err != nil:
+					c.logger.Error("client session error: %s", zap.Error(err))
+					if err = c.Close(); err != nil {
+						c.logger.Error("error closing client session for re-try: %s", zap.Error(err))
+					} else if err = c.Connect(ctx); err != nil {
+						c.logger.Error("error re-trying client session: %s", zap.Error(err))
+					}
+				}
+				sessionRetryCount += 1
+				time.Sleep(min(sessionRetryWait*time.Duration(sessionRetryCount), sessionRetryWaitMax))
+			}
+		}()
 
 		joeConf.SetAdapter(c)
 		return nil
