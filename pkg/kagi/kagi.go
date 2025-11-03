@@ -2,10 +2,14 @@ package kagi
 
 import (
 	// Standard library
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"strings"
@@ -17,10 +21,11 @@ import (
 
 // Error messages.
 var (
-	errNoClientBot      = errors.New("no valid bot instance assigned to client")
-	errEmptyLoginToken  = errors.New("non-empty login token required for client")
-	errAnswerEmptyQuery = errors.New("empty query given for answer")
-	errAnswerRequest    = errors.New("failed making HTTP request for answers")
+	errNoClientBot       = errors.New("no valid bot instance assigned to client")
+	errEmptyLoginToken   = errors.New("non-empty login token required for client")
+	errAnswerEmptyQuery  = errors.New("empty query given for answer")
+	errAnswerRequest     = errors.New("failed making HTTP request for answers")
+	errParseAnswerStream = errors.New("unable to parse streaming response body")
 )
 
 // Bot response messages.
@@ -36,8 +41,10 @@ const (
 	defaultUserAgent  = "kagi-answer-bot/0.1.0" // The HTTP user agent to use when making requests against Kagi.
 
 	// Values for Kagi Answers integration.
-	answerBaseURL    = "https://kagi.com/mother/context" // The base URL for Kagi Quick Answer HTTP requests.
-	answerQueryParam = "q"                               // The query parameter name used for Kagi Quick Answer queries.
+	answerBaseURL        = "https://kagi.com/mother/context" // The base URL for Kagi Quick Answer HTTP requests.
+	answerQueryParam     = "q"                               // The query parameter name used for Kagi Quick Answer queries.
+	answerContentType    = "application/vnd.kagi.stream"     // The custom content-type used for Kagi Quick Answer responses.
+	answerDocumentPrefix = "new_message.json"                // The prefix used for locating Answer documents in streaming responses.
 )
 
 // A Client represents a method of making calls to Kagi API endpoints, in support of bot interactions.
@@ -141,10 +148,8 @@ func (c *Client) HandleEvent(ctx context.Context, e joe.ReceiveMessageEvent) err
 
 // AnswerResponse represents structured data returned in response to the Kagi Quick Answer API.
 type answerResponse struct {
-	Data struct {
-		Markdown           string `json:"markdown"`
-		MarkdownReferences string `json:"md_references"`
-	} `json:"output_data"`
+	Markdown           string `json:"md"`
+	MarkdownReferences string `json:"references_md"`
 }
 
 // Fetch a quick answer from Kagi, as synthesized from multiple sources. The result will be a Markdown
@@ -155,12 +160,13 @@ func (c *Client) Answer(ctx context.Context, query string) (string, error) {
 	}
 
 	u := fmt.Sprintf("%s?%s=%s", answerBaseURL, answerQueryParam, url.QueryEscape(query))
-	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+	req, err := http.NewRequestWithContext(ctx, "POST", u, nil)
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", errAnswerRequest, err)
 	}
 
 	req.Header.Add("Cookie", fmt.Sprintf("%s=%s", sessionCookieName, c.loginToken))
+	req.Header.Add("Accept", answerContentType)
 	req.Header.Add("User-Agent", c.userAgent)
 
 	h := &http.Client{Transport: c.transport}
@@ -174,14 +180,60 @@ func (c *Client) Answer(ctx context.Context, query string) (string, error) {
 	defer resp.Body.Close() //nolint:errcheck
 	var answer answerResponse
 
-	if err := json.NewDecoder(resp.Body).Decode(&answer); err != nil {
-		return "", fmt.Errorf("%w: %w", errAnswerRequest, err)
+	contentType := resp.Header.Get("Content-Type")
+	mediaType, _, _ := mime.ParseMediaType(contentType)
+
+	switch mediaType {
+	case "text/html":
+		answer, err = parseAnswerStream(resp.Body)
+		if err != nil {
+			return "", fmt.Errorf("%w: failed parsing streaming answer: %w", errAnswerRequest, err)
+		}
+	case "application/json":
+		if err = json.NewDecoder(resp.Body).Decode(&answer); err != nil {
+			return "", fmt.Errorf("%w: %w", errAnswerRequest, err)
+		}
+	default:
+		return "", fmt.Errorf("%w: unknown content type: %s", errAnswerRequest, contentType)
 	}
 
-	result := answer.Data.Markdown
-	if answer.Data.MarkdownReferences != "" {
-		result += "\n---\nReferences:\n" + answer.Data.MarkdownReferences
+	result := answer.Markdown
+	if answer.MarkdownReferences != "" {
+		result += "\n---\nReferences:\n" + answer.MarkdownReferences
 	}
 
 	return strings.TrimSpace(result), nil
+}
+
+// ParseAnswerStream parses the a streamed Kagi Answer response from the given [io.Reader], returning
+// a valid response, or an error if none could be parsed.
+func parseAnswerStream(r io.Reader) (answerResponse, error) {
+	var scanner = bufio.NewScanner(r)
+	var answer answerResponse
+
+	for scanner.Scan() {
+		suffix, ok := bytes.CutPrefix(scanner.Bytes(), []byte(answerDocumentPrefix+":"))
+		if ok {
+			suffix = bytes.TrimFunc(suffix, isInvalidByte)
+			if err := json.Unmarshal(suffix, &answer); err != nil {
+				return answerResponse{}, err
+			}
+			return answer, nil
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return answerResponse{}, err
+	}
+
+	return answerResponse{}, errParseAnswerStream
+}
+
+// IsInvalidByte is used in trimming invalid bytes from streamed responses.
+func isInvalidByte(r rune) bool {
+	switch r {
+	case '\x00':
+		return true
+	}
+	return false
 }
