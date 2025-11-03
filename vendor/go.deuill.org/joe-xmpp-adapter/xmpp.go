@@ -491,15 +491,17 @@ func Adapter(ctx context.Context, conf Config) joe.Module {
 				case errors.Is(err, net.ErrClosed):
 					return
 				case err != nil:
-					c.logger.Error("client session error: %s", zap.Error(err))
-					if err = c.Close(); err != nil {
-						c.logger.Error("error closing client session for re-try: %s", zap.Error(err))
-					} else if err = c.Connect(ctx); err != nil {
-						c.logger.Error("error re-trying client session: %s", zap.Error(err))
+					if w := sessionRetryWait * time.Duration(sessionRetryCount); w > 0 {
+						time.Sleep(min(w, sessionRetryWaitMax))
 					}
+					c.logger.Error("client session error, retrying", zap.Error(err))
+					if err = c.Close(); err != nil {
+						c.logger.Error("error closing client session for re-try", zap.Error(err))
+					} else if err = c.Connect(ctx); err != nil {
+						c.logger.Error("error re-trying client session", zap.Error(err))
+					}
+					sessionRetryCount += 1
 				}
-				sessionRetryCount += 1
-				time.Sleep(min(sessionRetryWait*time.Duration(sessionRetryCount), sessionRetryWaitMax))
 			}
 		}()
 
