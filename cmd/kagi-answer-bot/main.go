@@ -30,20 +30,23 @@ func main() {
 	}
 
 	ctx, _ := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGQUIT, syscall.SIGTERM)
-	bot := joe.New(
-		"kagi-answer-bot",
-		joe.WithContext(ctx),
-		joe.WithLogLevel(logLevel),
-		xmpp.Adapter(ctx, xmpp.Config{
+	modules := []joe.Module{joe.WithContext(ctx), joe.WithLogLevel(logLevel)}
+
+	switch os.Getenv("KAGI_ANSWER_BOT_ADAPTER") {
+	case "console":
+		// Console adapter is the default, this is a no-op.
+	default:
+		modules = append(modules, xmpp.Adapter(ctx, xmpp.Config{
 			JID:         os.Getenv("KAGI_ANSWER_BOT_JID"),
 			Password:    os.Getenv("KAGI_ANSWER_BOT_PASSWORD"),
 			NoTLS:       os.Getenv("KAGI_ANSWER_BOT_NO_TLS") == "true",
 			NoVerifyTLS: os.Getenv("KAGI_ANSWER_BOT_NO_VERIFY_TLS") == "true",
 			UseStartTLS: os.Getenv("KAGI_ANSWER_BOT_USE_STARTTLS") == "true",
 			AllowedJIDs: os.Getenv("KAGI_ANSWER_BOT_ALLOWED_JIDS"),
-		}),
-	)
+		}))
+	}
 
+	bot := joe.New("kagi-answer-bot", modules...)
 	client, err := kagi.NewClient(
 		kagi.WithLoginToken(os.Getenv("KAGI_ANSWER_BOT_LOGIN_TOKEN")),
 		kagi.WithLogger(bot.Logger),
